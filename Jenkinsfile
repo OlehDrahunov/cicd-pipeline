@@ -49,7 +49,7 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    
+                    // Stop and remove only containers from current environment
                     sh "docker stop ${env.IMAGE_NAME} || true"
                     sh "docker rm ${env.IMAGE_NAME} || true"
                     sh "docker run -d -p ${env.PORT}:3000 --name ${env.IMAGE_NAME} ${env.IMAGE_NAME}"

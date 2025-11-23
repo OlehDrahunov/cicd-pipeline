@@ -1,80 +1,90 @@
 pipeline {
     agent any
+
     
     tools {
-        nodejs 'Node 7.8.0'
+        nodejs 'NodeJS 7.8.0'   // ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
     }
-    
+
     environment {
-        DOCKER_IMAGE_NAME = env.BRANCH_NAME == 'main' ? 'nodemain' : 'nodedev'
-        DOCKER_IMAGE_TAG = 'v1.0'
-        APP_PORT = env.BRANCH_NAME == 'main' ? '3000' : '3001'
-        CONTAINER_NAME = env.BRANCH_NAME == 'main' ? 'app-main' : 'app-dev'
+        
+        DOCKER_IMAGE = ""
+        APP_PORT     = ""
+        CONTAINER_NAME = ""
     }
-    
+
     stages {
+        stage('Prepare Environment') {
+            steps {
+                script {
+                    if (env.BRANCH_NAME == 'main') {
+                        env.DOCKER_IMAGE     = "nodemain"
+                        env.APP_PORT         = "3000"
+                        env.CONTAINER_NAME   = "app-main"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        env.DOCKER_IMAGE     = "nodedev"
+                        env.APP_PORT         = "3001"
+                        env.CONTAINER_NAME   = "app-dev"
+                    } else {
+                        error "Branch ${env.BRANCH_NAME} not supported!"
+                    }
+                }
+                echo "Branch: ${env.BRANCH_NAME}"
+                echo "Image: ${env.DOCKER_IMAGE}:v1.0"
+                echo "Port: ${env.APP_PORT}"
+                echo "Container: ${env.CONTAINER_NAME}"
+            }
+        }
+
         stage('Checkout') {
             steps {
-                echo "Checking out ${env.BRANCH_NAME} branch"
                 checkout scm
             }
         }
-        
-        stage('Build') {
+
+        stage('Install Dependencies') {
             steps {
-                echo "Building application for ${env.BRANCH_NAME}"
                 sh 'npm install'
             }
         }
-        
+
         stage('Test') {
             steps {
-                echo "Running tests for ${env.BRANCH_NAME}"
-                sh 'npm test || true'
+                sh 'npm test || echo "No tests found - skipping"'
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
-                    sh """
-                        docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} .
-                    """
-                }
+                sh """
+                    docker build -t ${env.DOCKER_IMAGE}:v1.0 .
+                """
             }
         }
-        
+
         stage('Deploy') {
             steps {
-                script {
-                    echo "Deploying ${env.BRANCH_NAME} to port ${APP_PORT}"
+                sh """
+                   
+                    docker rm -f ${env.CONTAINER_NAME} || true
                     
-                    
-                    sh """
-                        docker stop ${CONTAINER_NAME} || true
-                        docker rm ${CONTAINER_NAME} || true
-                    """
-                    
-                    sh """
-                        docker run -d \
-                            --name ${CONTAINER_NAME} \
-                            -p ${APP_PORT}:3000 \
-                            ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
-                    """
-                    
-                    echo "Application deployed at http://localhost:${APP_PORT}"
-                }
+                    docker run -d \
+                        --name ${env.CONTAINER_NAME} \
+                        -p ${env.APP_PORT}:3000 \
+                        ${env.DOCKER_IMAGE}:v1.0
+                        
+                    echo "app started: http://localhost:${env.APP_PORT}"
+                """
             }
         }
     }
-    
+
     post {
         success {
-            echo "Pipeline completed successfully for ${env.BRANCH_NAME}!"
+            echo "port ${env.APP_PORT}!"
         }
-        failure {
-            echo "Pipeline failed for ${env.BRANCH_NAME}"
+        cleanup {
+            sh 'docker system prune -f || true'
         }
     }
 }

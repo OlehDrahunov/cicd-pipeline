@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'NodeJS 25.2.1'   
+        nodejs 'NodeJS 7.8.0'  
     }
 
     environment {
@@ -24,39 +24,75 @@ pipeline {
                         env.APP_PORT       = "3001"
                         env.CONTAINER_NAME = "app-dev"
                     } else {
-                        error "Branch not supported: ${env.BRANCH_NAME}"
+                        currentBuild.result = 'FAILURE'
+                        error "Unsupported branch: ${env.BRANCH_NAME}"
                     }
+                    echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.APP_PORT}"
+                    echo "Image: ${env.DOCKER_IMAGE}:v1.0 | Container: ${env.CONTAINER_NAME}"
                 }
-                echo "Branch: ${env.BRANCH_NAME} → http://localhost:${env.APP_PORT}"
             }
         }
 
-        stage('Checkout')   { steps { checkout scm } }
-        
-        stage('Install') {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
             steps {
                 sh 'node --version'
                 sh 'npm --version'
-                sh 'npm install' 
+                sh 'npm install'
             }
         }
 
-        stage('Test')       { steps { sh 'npm test || echo "No tests"' } }
-
-        stage('Build Image') {
+        stage('Test') {
             steps {
-                sh "docker build -t ${env.DOCKER_IMAGE}:v1.0 ."
+                sh 'npm test || echo "No tests - skipped"'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                  
+                    sh '''
+                        sudo usermod -aG docker jenkins || true
+                        sudo chmod 666 /var/run/docker.sock || true
+                    '''
+                    sh "docker build -t ${env.DOCKER_IMAGE}:v1.0 ."
+                    sh "docker images ${env.DOCKER_IMAGE}:v1.0"
+                }
             }
         }
 
         stage('Deploy') {
             steps {
-                sh """
-                    docker rm -f ${env.CONTAINER_NAME} || true
-                    docker run -d --name ${env.CONTAINER_NAME} -p ${env.APP_PORT}:3000 ${env.DOCKER_IMAGE}:v1.0
-                    echo "Deployed: http://localhost:${env.APP_PORT}"
-                """
+                sh '''
+                   
+                    docker rm -f ${CONTAINER_NAME} || true
+                    
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        -p ${APP_PORT}:3000 \
+                        ${DOCKER_IMAGE}:v1.0
+                        
+                    echo "open browser: http://localhost:${APP_PORT}"
+                '''
             }
+        }
+    }
+
+    post {
+        success {
+            echo "app ${env.BRANCH_NAME} deployed at http://localhost:${env.APP_PORT}!"
+        }
+        failure {
+            echo "ERROR: Deployment failed for branch ${env.BRANCH_NAME}."
+        }
+        always {
+            sh 'docker ps | grep app- || echo "Другие контейнеры не тронуты"'
         }
     }
 }

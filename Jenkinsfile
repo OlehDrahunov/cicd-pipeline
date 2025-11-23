@@ -1,98 +1,66 @@
 pipeline {
     agent any
-
     tools {
-        nodejs 'NodeJS 7.8.0'  
+        nodejs 'Node 7.8.0'
     }
-
-    environment {
-        DOCKER_IMAGE     = ""
-        APP_PORT         = ""
-        CONTAINER_NAME   = ""
-    }
-
     stages {
-        stage('Define Environment') {
-            steps {
-                script {
-                    if (env.BRANCH_NAME == 'main') {
-                        env.DOCKER_IMAGE   = "nodemain"
-                        env.APP_PORT       = "3000"
-                        env.CONTAINER_NAME = "app-main"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        env.DOCKER_IMAGE   = "nodedev"
-                        env.APP_PORT       = "3001"
-                        env.CONTAINER_NAME = "app-dev"
-                    } else {
-                        currentBuild.result = 'FAILURE'
-                        error "Unsupported branch: ${env.BRANCH_NAME}"
-                    }
-                    echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.APP_PORT}"
-                    echo "Image: ${env.DOCKER_IMAGE}:v1.0 | Container: ${env.CONTAINER_NAME}"
-                }
-            }
-        }
-
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
-
-        stage('Install Dependencies') {
+        
+        stage('Build') {
             steps {
-                sh 'node --version'
-                sh 'npm --version'
                 sh 'npm install'
             }
         }
-
+        
         stage('Test') {
             steps {
-                sh 'npm test || echo "No tests - skipped"'
+                sh 'npm test'
             }
         }
-
+        
         stage('Build Docker Image') {
             steps {
                 script {
-                  
-                    sh '''
-                        sudo usermod -aG docker jenkins || true
-                        sudo chmod 666 /var/run/docker.sock || true
-                    '''
-                    sh "docker build -t ${env.DOCKER_IMAGE}:v1.0 ."
-                    sh "docker images ${env.DOCKER_IMAGE}:v1.0"
+                    if (env.BRANCH_NAME == 'main') {
+                        env.PORT = 3000
+                        env.IMAGE_NAME = "nodemain:v1.0"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        env.PORT = 3001
+                        env.IMAGE_NAME = "nodedev:v1.0"
+                    }
+                    sh "docker build -t ${env.IMAGE_NAME} ."
                 }
             }
         }
-
+        
+        stage('Scan Docker Image for Vulnerabilities') {
+            steps {
+                script {
+                    def vulnerabilities = sh(script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${env.IMAGE_NAME}", returnStdout: true).trim()
+                    echo "Vulnerability Report:\n${vulnerabilities}"
+                }
+            }
+        }
+        
         stage('Deploy') {
             steps {
-                sh '''
-                   
-                    docker rm -f ${CONTAINER_NAME} || true
-                    
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        -p ${APP_PORT}:3000 \
-                        ${DOCKER_IMAGE}:v1.0
-                        
-                    echo "open browser: http://localhost:${APP_PORT}"
-                '''
+                script {
+                    // Stop and remove only containers from current environment
+                    sh "docker stop ${env.IMAGE_NAME} || true"
+                    sh "docker rm ${env.IMAGE_NAME} || true"
+                    sh "docker run -d -p ${env.PORT}:3000 --name ${env.IMAGE_NAME} ${env.IMAGE_NAME}"
+                }
             }
         }
     }
-
+    
     post {
-        success {
-            echo "app ${env.BRANCH_NAME} deployed at http://localhost:${env.APP_PORT}!"
-        }
-        failure {
-            echo "ERROR: Deployment failed for branch ${env.BRANCH_NAME}."
-        }
         always {
-            sh 'docker ps | grep app- || echo "Другие контейнеры не тронуты"'
+            echo "Pipeline execution completed for branch: ${env.BRANCH_NAME}"
         }
     }
 }

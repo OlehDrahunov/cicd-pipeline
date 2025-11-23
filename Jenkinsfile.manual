@@ -1,66 +1,82 @@
 pipeline {
     agent any
-
+    
     tools {
-        nodejs 'NodeJS 7.8.0'   
+        nodejs 'Node 7.8.0'
     }
-
+    
     parameters {
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['main', 'dev'],
-            description: 'Choose the environment to deploy to.'
-        )
+        choice(name: 'BRANCH_NAME', choices: ['main', 'dev'], description: 'Select branch to deploy')
     }
-
+    
+    environment {
+        DOCKER_IMAGE_NAME = params.BRANCH_NAME == 'main' ? 'nodemain' : 'nodedev'
+        DOCKER_IMAGE_TAG = 'v1.0'
+        APP_PORT = params.BRANCH_NAME == 'main' ? '3000' : '3001'
+        CONTAINER_NAME = params.BRANCH_NAME == 'main' ? 'app-main' : 'app-dev'
+    }
+    
     stages {
         stage('Checkout') {
             steps {
-                script {
-                    def branch = ENVIRONMENT == 'main' ? 'main' : 'dev'
-                    checkout scmGit(
-                        branches: [[name: "*/${branch}"]],
-                        userRemoteConfigs: [[url: 'https://github.com/OlehDrahunov/cicd-pipeline.git']]
-                    )
-                }
+                echo "Checking out ${params.BRANCH_NAME} branch"
+                git branch: "${params.BRANCH_NAME}",
+                    url: 'https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git',
+                    credentialsId: 'github-token'
             }
         }
-
-        stage('Install & Test') {
+        
+        stage('Build') {
             steps {
-                sh 'node --version && npm --version'
-                sh 'npm install --legacy-peer-deps'
-                sh 'npm test || echo "No tests - OK"'
+                echo "Building application for ${params.BRANCH_NAME}"
+                sh 'npm install'
             }
         }
-
-        stage('Build & Deploy') {
+        
+        stage('Test') {
+            steps {
+                echo "Running tests for ${params.BRANCH_NAME}"
+                sh 'npm test || true'
+            }
+        }
+        
+        stage('Build Docker Image') {
             steps {
                 script {
-                    def image   = ENVIRONMENT == 'main' ? 'nodemain' : 'nodedev'
-                    def port    = ENVIRONMENT == 'main' ? '3000'    : '3001'
-                    def name    = ENVIRONMENT == 'main' ? 'app-main' : 'app-dev'
-
+                    echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
                     sh """
-                        docker build -t ${image}:v1.0 .
-
-                        docker rm -f ${name} || true
-
-                        docker run -d --name ${name} -p ${port}:3000 ${image}:v1.0
-
-                        echo "App ${ENVIRONMENT.toUpperCase()} deployed → http://localhost:${port}"
+                        docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} .
                     """
                 }
             }
         }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo "Deploying ${params.BRANCH_NAME} to port ${APP_PORT}"
+                    
+                    sh """
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                        docker run -d \
+                            --name ${CONTAINER_NAME} \
+                            -p ${APP_PORT}:3000 \
+                            ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+                    """
+                    
+                    echo "Application deployed at http://localhost:${APP_PORT}"
+                }
+            }
+        }
     }
-
+    
     post {
         success {
-            echo "App ${params.ENVIRONMENT} works at http://localhost:${params.ENVIRONMENT == 'main' ? '3000' : '3001'}"
+            echo "Manual deployment completed successfully for ${params.BRANCH_NAME}!"
         }
-        always {
-            echo "run: docker ps | grep app-"
+        failure {
+            echo "Manual deployment failed for ${params.BRANCH_NAME}"
         }
     }
 }

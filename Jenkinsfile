@@ -2,13 +2,7 @@ pipeline {
     agent any
 
     tools {
-        nodejs 'NodeJS 7.8.0'  
-    }
-
-    environment {
-        DOCKER_IMAGE     = ""
-        APP_PORT         = ""
-        CONTAINER_NAME   = ""
+        nodejs 'NodeJS 7.8.0'   
     }
 
     stages {
@@ -16,83 +10,56 @@ pipeline {
             steps {
                 script {
                     if (env.BRANCH_NAME == 'main') {
-                        env.DOCKER_IMAGE   = "nodemain"
-                        env.APP_PORT       = "3000"
-                        env.CONTAINER_NAME = "app-main"
+                        env.IMAGE   = "nodemain"
+                        env.PORT    = "3000"
+                        env.NAME    = "app-main"
                     } else if (env.BRANCH_NAME == 'dev') {
-                        env.DOCKER_IMAGE   = "nodedev"
-                        env.APP_PORT       = "3001"
-                        env.CONTAINER_NAME = "app-dev"
+                        env.IMAGE   = "nodedev"
+                        env.PORT    = "3001"
+                        env.NAME    = "app-dev"
                     } else {
-                        currentBuild.result = 'FAILURE'
-                        error "Unsupported branch: ${env.BRANCH_NAME}"
+                        error "Unsupported branch"
                     }
-                    echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.APP_PORT}"
-                    echo "Image: ${env.DOCKER_IMAGE}:v1.0 | Container: ${env.CONTAINER_NAME}"
                 }
+                echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.PORT}"
             }
         }
 
-        stage('Checkout') {
+        stage('Checkout & Install') {
             steps {
                 checkout scm
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh 'node --version'
-                sh 'npm --version'
-                sh 'npm install'
+                sh 'node --version && npm --version'
+                sh 'npm install --legacy-peer-deps'
             }
         }
 
         stage('Test') {
             steps {
-                sh 'npm test || echo "No tests - skipped"'
+                sh 'npm test || echo "No tests - OK"'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Deploy') {
             steps {
-                script {
-                  
-                    sh '''
-                        sudo usermod -aG docker jenkins || true
-                        sudo chmod 666 /var/run/docker.sock || true
-                    '''
-                    sh "docker build -t ${env.DOCKER_IMAGE}:v1.0 ."
-                    sh "docker images ${env.DOCKER_IMAGE}:v1.0"
-                }
-            }
-        }
+                
+                sh """
+                    docker build -t ${env.IMAGE}:v1.0 .
 
-        stage('Deploy') {
-            steps {
-                sh '''
-                   
-                    docker rm -f ${CONTAINER_NAME} || true
-                    
+                    docker rm -f ${env.NAME} || true
+
                     docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        -p ${APP_PORT}:3000 \
-                        ${DOCKER_IMAGE}:v1.0
-                        
-                    echo "open browser: http://localhost:${APP_PORT}"
-                '''
+                        --name ${env.NAME} \
+                        -p ${env.PORT}:3000 \
+                        ${env.IMAGE}:v1.0
+
+                    echo "${env.BRANCH_NAME} deployed → http://localhost:${env.PORT}"
+                """
             }
         }
     }
 
     post {
-        success {
-            echo "app ${env.BRANCH_NAME} deployed at http://localhost:${env.APP_PORT}!"
-        }
-        failure {
-            echo "ERROR: Deployment failed for branch ${env.BRANCH_NAME}."
-        }
-        always {
-            sh 'docker ps | grep app- || echo "Другие контейнеры не тронуты"'
-        }
+        success { echo "ok! ${env.BRANCH_NAME} deployed at http://localhost:${env.PORT} ${env.PORT}" }
+        failure { echo "error" }
     }
 }

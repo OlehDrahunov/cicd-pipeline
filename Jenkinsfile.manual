@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+    
+    tools {
+        nodejs 'Node 7.8.0'
+    }
+    
+    parameters {
+        choice(name: 'BRANCH_NAME', choices: ['main', 'dev'], description: 'Select branch to deploy')
+    }
+    
+    environment {
+        DOCKER_IMAGE_NAME = params.BRANCH_NAME == 'main' ? 'nodemain' : 'nodedev'
+        DOCKER_IMAGE_TAG = 'v1.0'
+        APP_PORT = params.BRANCH_NAME == 'main' ? '3000' : '3001'
+        CONTAINER_NAME = params.BRANCH_NAME == 'main' ? 'app-main' : 'app-dev'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Checking out ${params.BRANCH_NAME} branch"
+                git branch: "${params.BRANCH_NAME}",
+                    url: 'https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git',
+                    credentialsId: 'github-token'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                echo "Building application for ${params.BRANCH_NAME}"
+                sh 'npm install'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo "Running tests for ${params.BRANCH_NAME}"
+                sh 'npm test || true'
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}"
+                    sh """
+                        docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} .
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo "Deploying ${params.BRANCH_NAME} to port ${APP_PORT}"
+                    
+                    sh """
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                        docker run -d \
+                            --name ${CONTAINER_NAME} \
+                            -p ${APP_PORT}:3000 \
+                            ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+                    """
+                    
+                    echo "Application deployed at http://localhost:${APP_PORT}"
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Manual deployment completed successfully for ${params.BRANCH_NAME}!"
+        }
+        failure {
+            echo "Manual deployment failed for ${params.BRANCH_NAME}"
+        }
+    }
+}

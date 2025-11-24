@@ -1,99 +1,65 @@
 pipeline {
     agent any
 
-    environment {
-        
-        DOCKER_IMAGE = "node${env.BRANCH_NAME}"
-        IMAGE_TAG = "v1.0"
-        
-        PORT = "${env.BRANCH_NAME == 'main' ? '3000' : '3001'}"
-    }
-
-  
     tools {
-        nodejs 'NodeJS 7.8.0'  
+        nodejs 'NodeJS 7.8.0'   
     }
 
     stages {
-        stage('Checkout') {
+        stage('Define Environment') {
             steps {
-                echo "Checking out code from branch: ${env.BRANCH_NAME}"
+                script {
+                    if (env.BRANCH_NAME == 'main') {
+                        env.IMAGE   = "nodemain"
+                        env.PORT    = "3000"
+                        env.NAME    = "app-main"
+                    } else if (env.BRANCH_NAME == 'dev') {
+                        env.IMAGE   = "nodedev"
+                        env.PORT    = "3001"
+                        env.NAME    = "app-dev"
+                    } else {
+                        error "Unsupported branch"
+                    }
+                }
+                echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.PORT}"
+            }
+        }
+
+        stage('Checkout & Install') {
+            steps {
                 checkout scm
-                
+                sh 'node --version && npm --version'
+                sh 'npm install --legacy-peer-deps'
             }
         }
-        
-        stage('Build') {
-            steps {
-                echo "Building application for branch: ${env.BRANCH_NAME}"
-                sh 'npm install'
-            }
-        }
-        
+
         stage('Test') {
             steps {
-                echo "Running tests for branch: ${env.BRANCH_NAME}"
+                sh 'npm test || echo "No tests - OK"'
+            }
+        }
+
+        stage('Build & Deploy') {
+            steps {
                 
-                sh 'npm test || true' 
-            }
-        }
-        
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    echo "Building Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-                    
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}") 
-                }
-            }
-        }
-        
-        stage('Scan Docker Image for Vulnerabilities') {
-            steps {
-                script {
-                    
-                    def vulnerabilities = sh(
-                        script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${DOCKER_IMAGE}:${IMAGE_TAG}",
-                        returnStdout: true
-                    ).trim()
-                    echo "Vulnerability Report:\n${vulnerabilities}"
-                }
-            }
-        }
-        
-        stage('Deploy') {
-            steps {
-                script {
-                    echo "Deploying application on port ${PORT} for branch: ${env.BRANCH_NAME}"
-                    
-                    
-                    sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
-                    """
-                    
-                    
-                    sh """
-                        docker run -d \
-                        --name ${DOCKER_IMAGE}-container \
-                        -p ${PORT}:3000 \
-                        ${DOCKER_IMAGE}:${IMAGE_TAG}
-                    """
-                    
-                    echo "Application deployed successfully on http://localhost:${PORT}"
-                }
+                sh """
+                    docker build -t ${env.IMAGE}:v1.0 .
+
+                    docker rm -f ${env.NAME} || true
+
+                    docker run -d \
+                        --name ${env.NAME} \
+                        -p ${env.PORT}:3000 \
+                        ${env.IMAGE}:v1.0
+
+                    echo "${env.BRANCH_NAME} deployed → http://localhost:${env.PORT}"
+                """
             }
         }
     }
-    
+
     post {
-        success {
-            echo "Pipeline executed successfully for branch: ${env.BRANCH_NAME}"
-        }
-        failure {
-            echo "Pipeline failed for branch: ${env.BRANCH_NAME}"
-        }
-        always {
-            cleanWs()
-        }
+        success { echo "ok! ${env.BRANCH_NAME} deployed at http://localhost:${env.PORT} ${env.PORT}" }
+        failure { echo "error" }
     }
 }

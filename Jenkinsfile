@@ -1,71 +1,81 @@
-  agent any
+pipeline {
+    agent any
+
+    
+    environment {
+        
+        IMAGE = "${env.BRANCH_NAME == 'main' ? 'nodemain' : 'nodedev'}"
+        PORT = "${env.BRANCH_NAME == 'main' ? '3000' : '3001'}"
+        NAME = "app-${env.BRANCH_NAME}"
+        IMAGE_TAG = "v1.0"
+    }
 
     tools {
-        nodejs 'NodeJS 7.8.0'   
-
+        nodejs 'NodeJS 7.8.0'
     }
 
     stages {
-        stage('Define Environment') {
+        stage('Checkout') {
             steps {
-                script {
-                    if (env.BRANCH_NAME == 'main') {
-                        env.IMAGE   = "nodemain"
-                        env.PORT    = "3000"
-                        env.NAME    = "app-main"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        env.IMAGE   = "nodedev"
-                        env.PORT    = "3001"
-                        env.NAME    = "app-dev"
-                    } else {
-                        error "Unsupported branch"
-
-                    }
-
-
-                }
-                echo "Deploying ${env.BRANCH_NAME} → http://localhost:${env.PORT}"
+                echo "Checking out code for branch: ${env.BRANCH_NAME}"
+                checkout scm
             }
         }
 
-        stage('Checkout & Install') {
+        stage('Build Dependencies') {
             steps {
-                checkout scm
-                sh 'node --version && npm --version'
                 sh 'npm install --legacy-peer-deps'
-
             }
         }
 
         stage('Test') {
             steps {
-                sh 'npm test || echo "No tests - OK"'
+                sh 'npm test || true' 
             }
         }
 
-        stage('Build & Deploy') {
+        stage('Build Docker Image') {
             steps {
-                
+                sh "docker build -t ${IMAGE}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('Scan Docker Image') {
+            steps {
+                script {
+                    echo "Scanning Docker image: ${IMAGE}:${IMAGE_TAG}"
+                    
+                    sh "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${IMAGE}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo "Deploying ${env.BRANCH_NAME} to http://localhost:${PORT}"
                 sh """
-                    docker build -t ${env.IMAGE}:v1.0 .
+                    # Advanced Task: Stop and remove ONLY the container for this environment
+                    docker ps -a --filter "name=${NAME}" --format "{{.ID}}" | xargs -r docker rm -f
 
-                    docker rm -f ${env.NAME} || true
-
-                    docker run -d \
-                        --name ${env.NAME} \
-                        -p ${env.PORT}:3000 \
-                        ${env.IMAGE}:v1.0
-
-                    echo "${env.BRANCH_NAME} deployed → http://localhost:${env.PORT}"
+                    docker run -d \\
+                        --name ${NAME} \\
+                        -p ${PORT}:3000 \\
+                        ${IMAGE}:${IMAGE_TAG}
                 """
+                echo "${env.BRANCH_NAME} deployed successfully."
             }
         }
     }
 
     post {
-        success { echo "ok! ${env.BRANCH_NAME} deployed at http://localhost:${env.PORT} ${env.PORT}" }
-        failure { echo "error" }
-
-
+        success {
+            echo "✅ Pipeline Success: ${env.BRANCH_NAME} deployed at http://localhost:${PORT}"
+        }
+        failure {
+            echo "❌ Pipeline Failed for ${env.BRANCH_NAME}"
+        }
+        always {
+            cleanWs()
+        }
     }
 }

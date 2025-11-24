@@ -8,7 +8,7 @@ pipeline {
     }
     
     tools {
-        nodejs 'Node 7.8.0'
+        nodejs 'NodeJS 7.8.0'  // ← ИЗМЕНЕНО: было 'Node 7.8.0'
     }
     
     stages {

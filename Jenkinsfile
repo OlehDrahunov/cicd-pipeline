@@ -8,7 +8,7 @@ pipeline {
     }
     
     tools {
-        nodejs 'Node 7.8.0'
+        nodejs 'NodeJS 7.8.0'  
     }
     
     stages {
@@ -59,12 +59,12 @@ pipeline {
                 script {
                     echo "Deploying application on port ${PORT} for branch: ${env.BRANCH_NAME}"
                     
-                 
+            
                     sh """
                         docker ps -a --filter "name=${DOCKER_IMAGE}" --format "{{.ID}}" | xargs -r docker rm -f
                     """
                     
-                   
+                 
                     sh """
                         docker run -d \
                         --name ${DOCKER_IMAGE}-container \

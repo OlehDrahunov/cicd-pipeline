@@ -15,21 +15,27 @@ pipeline {
     }
     
     environment {
-        GIT_REPO = 'https://github.com/OlehDrahunov/cicd-pipeline.git'
         DOCKER_IMAGE = "node${params.BRANCH}"
         IMAGE_TAG = "v1.0"
         PORT = "${params.BRANCH == 'main' ? '3000' : '3001'}"
     }
     
     tools {
-        nodejs 'Node 7.8.0'
+        nodejs 'NodeJS 7.8.0'  
     }
     
     stages {
         stage('Checkout') {
             steps {
                 echo "Checking out ${params.BRANCH} branch"
-                git branch: "${params.BRANCH}", url: "${GIT_REPO}"
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${params.BRANCH}"]],  
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/OlehDrahunov/cicd-pipeline.git',
+                        credentialsId: 'github-credentials'  
+                    ]]
+                ])
             }
         }
         

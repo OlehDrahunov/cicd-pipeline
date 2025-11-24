@@ -1,21 +1,25 @@
 pipeline {
     agent any
-    
+
     environment {
+        
         DOCKER_IMAGE = "node${env.BRANCH_NAME}"
         IMAGE_TAG = "v1.0"
+        
         PORT = "${env.BRANCH_NAME == 'main' ? '3000' : '3001'}"
     }
-    
+
+  
     tools {
-        nodejs 'NodeJS 7.8.0'  // ← ИЗМЕНЕНО: было 'Node 7.8.0'
+        nodejs 'NodeJS 7.8.0'  
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
                 echo "Checking out code from branch: ${env.BRANCH_NAME}"
                 checkout scm
+                
             }
         }
         
@@ -29,7 +33,8 @@ pipeline {
         stage('Test') {
             steps {
                 echo "Running tests for branch: ${env.BRANCH_NAME}"
-                sh 'npm test || true'
+                
+                sh 'npm test || true' 
             }
         }
         
@@ -37,7 +42,8 @@ pipeline {
             steps {
                 script {
                     echo "Building Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
+                    
+                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}") 
                 }
             }
         }
@@ -45,6 +51,7 @@ pipeline {
         stage('Scan Docker Image for Vulnerabilities') {
             steps {
                 script {
+                    
                     def vulnerabilities = sh(
                         script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${DOCKER_IMAGE}:${IMAGE_TAG}",
                         returnStdout: true
@@ -59,12 +66,12 @@ pipeline {
                 script {
                     echo "Deploying application on port ${PORT} for branch: ${env.BRANCH_NAME}"
                     
-                    // Удаляем только контейнеры текущего окружения
+                    
                     sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}" --format "{{.ID}}" | xargs -r docker rm -f
+                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
                     """
                     
-                    // Запускаем новый контейнер
+                    
                     sh """
                         docker run -d \
                         --name ${DOCKER_IMAGE}-container \

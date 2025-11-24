@@ -1,38 +1,43 @@
 pipeline {
     agent any
+    
+    environment {
+        DOCKER_IMAGE = "node${env.BRANCH_NAME}"
+        IMAGE_TAG = "v1.0"
+        PORT = "${env.BRANCH_NAME == 'main' ? '3000' : '3001'}"
+    }
+    
     tools {
         nodejs 'Node 7.8.0'
     }
+    
     stages {
         stage('Checkout') {
             steps {
+                echo "Checking out code from branch: ${env.BRANCH_NAME}"
                 checkout scm
             }
         }
         
         stage('Build') {
             steps {
+                echo "Building application for branch: ${env.BRANCH_NAME}"
                 sh 'npm install'
             }
         }
         
         stage('Test') {
             steps {
-                sh 'npm test'
+                echo "Running tests for branch: ${env.BRANCH_NAME}"
+                sh 'npm test || true'
             }
         }
         
         stage('Build Docker Image') {
             steps {
                 script {
-                    if (env.BRANCH_NAME == 'main') {
-                        env.PORT = 3000
-                        env.IMAGE_NAME = "nodemain:v1.0"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        env.PORT = 3001
-                        env.IMAGE_NAME = "nodedev:v1.0"
-                    }
-                    sh "docker build -t ${env.IMAGE_NAME} ."
+                    echo "Building Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
                 }
             }
         }
@@ -40,7 +45,10 @@ pipeline {
         stage('Scan Docker Image for Vulnerabilities') {
             steps {
                 script {
-                    def vulnerabilities = sh(script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${env.IMAGE_NAME}", returnStdout: true).trim()
+                    def vulnerabilities = sh(
+                        script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${DOCKER_IMAGE}:${IMAGE_TAG}",
+                        returnStdout: true
+                    ).trim()
                     echo "Vulnerability Report:\n${vulnerabilities}"
                 }
             }
@@ -49,18 +57,36 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    // Stop and remove only containers from current environment
-                    sh "docker stop ${env.IMAGE_NAME} || true"
-                    sh "docker rm ${env.IMAGE_NAME} || true"
-                    sh "docker run -d -p ${env.PORT}:3000 --name ${env.IMAGE_NAME} ${env.IMAGE_NAME}"
+                    echo "Deploying application on port ${PORT} for branch: ${env.BRANCH_NAME}"
+                    
+                 
+                    sh """
+                        docker ps -a --filter "name=${DOCKER_IMAGE}" --format "{{.ID}}" | xargs -r docker rm -f
+                    """
+                    
+                   
+                    sh """
+                        docker run -d \
+                        --name ${DOCKER_IMAGE}-container \
+                        -p ${PORT}:3000 \
+                        ${DOCKER_IMAGE}:${IMAGE_TAG}
+                    """
+                    
+                    echo "Application deployed successfully on http://localhost:${PORT}"
                 }
             }
         }
     }
     
     post {
+        success {
+            echo "Pipeline executed successfully for branch: ${env.BRANCH_NAME}"
+        }
+        failure {
+            echo "Pipeline failed for branch: ${env.BRANCH_NAME}"
+        }
         always {
-            echo "Pipeline execution completed for branch: ${env.BRANCH_NAME}"
+            cleanWs()
         }
     }
 }

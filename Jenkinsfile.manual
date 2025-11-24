@@ -1,6 +1,8 @@
+
 pipeline {
     agent any
-    
+
+   
     parameters {
         choice(
             name: 'BRANCH',
@@ -13,52 +15,51 @@ pipeline {
             description: 'Select action to perform'
         )
     }
-    
+
     environment {
-        DOCKER_IMAGE = "node${params.BRANCH}"
+       
+        DOCKER_IMAGE = "node${params.BRANCH}" 
         IMAGE_TAG = "v1.0"
+        
         PORT = "${params.BRANCH == 'main' ? '3000' : '3001'}"
     }
+
     
     tools {
         nodejs 'NodeJS 7.8.0'  
     }
-    
+
     stages {
         stage('Checkout') {
+            when {
+                
+                expression { params.ACTION != null } 
+            }
             steps {
                 echo "Checking out ${params.BRANCH} branch"
+               
                 checkout([
                     $class: 'GitSCM',
                     branches: [[name: "*/${params.BRANCH}"]],  
                     userRemoteConfigs: [[
-                        url: 'https://github.com/OlehDrahunov/cicd-pipeline.git',
+                        url: 'https://github.com/OlehDrahunov/cicd-pipeline.git', 
                         credentialsId: 'github-credentials'  
                     ]]
                 ])
             }
         }
         
-        stage('Build') {
+        stage('Build & Test') {
             when {
                 expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
             }
             steps {
-                echo "Building application for ${params.BRANCH}"
+                echo "Building and testing application for ${params.BRANCH}"
                 sh 'npm install'
-            }
-        }
-        
-        stage('Test') {
-            when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
-            }
-            steps {
-                echo "Running tests for ${params.BRANCH}"
                 sh 'npm test || true'
             }
         }
-        
+
         stage('Build Docker Image') {
             when {
                 expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
@@ -94,9 +95,9 @@ pipeline {
                 script {
                     echo "Deploying ${params.BRANCH} on port ${PORT}"
                     
-                    
+                   
                     sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}" --format "{{.ID}}" | xargs -r docker rm -f
+                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
                     """
                     
                     
@@ -119,8 +120,9 @@ pipeline {
             steps {
                 script {
                     echo "Stopping ${params.BRANCH} environment"
+                    
                     sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}" --format "{{.ID}}" | xargs -r docker rm -f
+                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
                     """
                 }
             }

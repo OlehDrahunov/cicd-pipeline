@@ -1,58 +1,82 @@
-
 pipeline {
     agent any
 
-    environment {
-      
-        DOCKER_IMAGE = "node${env.BRANCH_NAME}"
-        IMAGE_TAG = "v1.0"
-       
-        PORT = "${env.BRANCH_NAME == 'main' ? '3000' : '3001'}"
+    
+    parameters {
+        choice(
+            name: 'BRANCH',
+            choices: ['main', 'dev'],
+            description: 'Select branch to deploy'
+        )
+        choice(
+            name: 'ACTION',
+            choices: ['deploy', 'stop', 'restart'],
+            description: 'Select action to perform'
+        )
     }
 
-  
+    environment {
+       
+        DOCKER_IMAGE = "node${params.BRANCH}" 
+        IMAGE_TAG = "v1.0"
+        
+        PORT = "${params.BRANCH == 'main' ? '3000' : '3001'}"
+    }
+
+    
     tools {
         nodejs 'NodeJS 7.8.0'  
     }
 
     stages {
         stage('Checkout') {
-            steps {
-                echo "Checking out code from branch: ${env.BRANCH_NAME}"
-                checkout scm
+            when {
                 
+                expression { params.ACTION != null } 
+            }
+            steps {
+                echo "Checking out ${params.BRANCH} branch"
+           
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: "*/${params.BRANCH}"]],  
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/OlehDrahunov/cicd-pipeline.git', 
+                        credentialsId: 'github-credentials'  
+                    ]]
+                ])
             }
         }
         
-        stage('Build') {
+        stage('Build & Test') {
+            when {
+                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
+            }
             steps {
-                echo "Building application for branch: ${env.BRANCH_NAME}"
+                echo "Building and testing application for ${params.BRANCH}"
                 sh 'npm install'
+                sh 'npm test || true'
             }
         }
-        
-        stage('Test') {
-            steps {
-                echo "Running tests for branch: ${env.BRANCH_NAME}"
-             
-                sh 'npm test || true' 
-            }
-        }
-        
+
         stage('Build Docker Image') {
+            when {
+                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
+            }
             steps {
                 script {
                     echo "Building Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-              
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}") 
+                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
                 }
             }
         }
         
-        stage('Scan Docker Image for Vulnerabilities') {
+        stage('Scan Docker Image') {
+            when {
+                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
+            }
             steps {
                 script {
-                   
                     def vulnerabilities = sh(
                         script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${DOCKER_IMAGE}:${IMAGE_TAG}",
                         returnStdout: true
@@ -62,10 +86,13 @@ pipeline {
             }
         }
         
-        stage('Deploy') {
+        stage('Deploy/Restart') {
+            when {
+                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
+            }
             steps {
                 script {
-                    echo "Deploying application on port ${PORT} for branch: ${env.BRANCH_NAME}"
+                    echo "Deploying ${params.BRANCH} on port ${PORT}"
                     
                    
                     sh """
@@ -80,7 +107,22 @@ pipeline {
                         ${DOCKER_IMAGE}:${IMAGE_TAG}
                     """
                     
-                    echo "Application deployed successfully on http://localhost:${PORT}"
+                    echo "Application deployed on http://localhost:${PORT}"
+                }
+            }
+        }
+        
+        stage('Stop') {
+            when {
+                expression { params.ACTION == 'stop' }
+            }
+            steps {
+                script {
+                    echo "Stopping ${params.BRANCH} environment"
+             
+                    sh """
+                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
+                    """
                 }
             }
         }
@@ -88,13 +130,10 @@ pipeline {
     
     post {
         success {
-            echo "Pipeline executed successfully for branch: ${env.BRANCH_NAME}"
+            echo "Manual deployment completed successfully for ${params.BRANCH}"
         }
         failure {
-            echo "Pipeline failed for branch: ${env.BRANCH_NAME}"
-        }
-        always {
-            cleanWs()
+            echo "Manual deployment failed for ${params.BRANCH}"
         }
     }
 }

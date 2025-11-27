@@ -10,7 +10,7 @@ pipeline {
     }
 
     tools {
-        nodejs 'NodeJS 7.8.0'   
+        nodejs 'NodeJS 7.8.0'
     }
 
     stages {
@@ -36,7 +36,6 @@ pipeline {
         stage('Checkout & Install') {
             steps {
                 git branch: "${params.BRANCH}", url: 'https://github.com/OlehDrahunov/cicd-pipeline.git'
-                sh 'node --version && npm --version'
                 sh 'npm install --legacy-peer-deps'
             }
         }
@@ -52,11 +51,12 @@ pipeline {
                 sh """
                     docker build -t ${env.IMAGE}:v1.0 .
 
-                    docker rm -f ${env.NAME} || true
+                    
+                    docker ps -q -f publish=${env.PORT} | xargs -r docker rm -f
 
-                    docker run -d \
-                        --name ${env.NAME} \
-                        -p ${env.PORT}:3000 \
+                    docker run -d \\
+                        --name ${env.NAME} \\
+                        -p ${env.PORT}:3000 \\
                         ${env.IMAGE}:v1.0
 
                     echo "${params.BRANCH} deployed → http://localhost:${env.PORT}"
@@ -66,11 +66,11 @@ pipeline {
     }
 
     post {
-        success { 
-            echo "✅ ${params.BRANCH} successfully deployed at http://localhost:${env.PORT}" 
+        success {
+            echo "✅ ${params.BRANCH} successfully deployed at http://localhost:${env.PORT}"
         }
-        failure { 
-            echo "❌ Deployment failed for ${params.BRANCH}" 
+        failure {
+            echo "❌ Deployment failed for ${params.BRANCH}"
         }
     }
 }

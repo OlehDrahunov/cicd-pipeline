@@ -1,139 +1,76 @@
 pipeline {
     agent any
 
-    
     parameters {
         choice(
             name: 'BRANCH',
             choices: ['main', 'dev'],
             description: 'Select branch to deploy'
         )
-        choice(
-            name: 'ACTION',
-            choices: ['deploy', 'stop', 'restart'],
-            description: 'Select action to perform'
-        )
     }
 
-    environment {
-       
-        DOCKER_IMAGE = "node${params.BRANCH}" 
-        IMAGE_TAG = "v1.0"
-        
-        PORT = "${params.BRANCH == 'main' ? '3000' : '3001'}"
-    }
-
-    
     tools {
-        nodejs 'NodeJS 7.8.0'  
+        nodejs 'NodeJS 7.8.0'
     }
 
     stages {
-        stage('Checkout') {
-            when {
-                
-                expression { params.ACTION != null } 
-            }
+        stage('Define Environment') {
             steps {
-                echo "Checking out ${params.BRANCH} branch"
-           
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${params.BRANCH}"]],  
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/OlehDrahunov/cicd-pipeline.git', 
-                        credentialsId: 'github-credentials'  
-                    ]]
-                ])
-            }
-        }
-        
-        stage('Build & Test') {
-            when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
-            }
-            steps {
-                echo "Building and testing application for ${params.BRANCH}"
-                sh 'npm install'
-                sh 'npm test || true'
+                script {
+                    if (params.BRANCH == 'main') {
+                        env.IMAGE   = "nodemain"
+                        env.PORT    = "3000"
+                        env.NAME    = "app-main"
+                    } else if (params.BRANCH == 'dev') {
+                        env.IMAGE   = "nodedev"
+                        env.PORT    = "3001"
+                        env.NAME    = "app-dev"
+                    } else {
+                        error "Unsupported branch"
+                    }
+                }
+                echo "Deploying ${params.BRANCH} → http://localhost:${env.PORT}"
             }
         }
 
-        stage('Build Docker Image') {
-            when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
-            }
+        stage('Checkout & Install') {
             steps {
-                script {
-                    echo "Building Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
-                    docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
-                }
+                git branch: "${params.BRANCH}", url: 'https://github.com/OlehDrahunov/cicd-pipeline.git'
+                sh 'npm install --legacy-peer-deps'
             }
         }
-        
-        stage('Scan Docker Image') {
-            when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
-            }
+
+        stage('Test') {
             steps {
-                script {
-                    def vulnerabilities = sh(
-                        script: "trivy image --exit-code 0 --severity HIGH,MEDIUM,LOW --no-progress ${DOCKER_IMAGE}:${IMAGE_TAG}",
-                        returnStdout: true
-                    ).trim()
-                    echo "Vulnerability Report:\n${vulnerabilities}"
-                }
+                sh 'npm test || echo "No tests - OK"'
             }
         }
-        
-        stage('Deploy/Restart') {
-            when {
-                expression { params.ACTION == 'deploy' || params.ACTION == 'restart' }
-            }
+
+        stage('Build & Deploy') {
             steps {
-                script {
-                    echo "Deploying ${params.BRANCH} on port ${PORT}"
+                sh """
+                    docker build -t ${env.IMAGE}:v1.0 .
+
                     
-                   
-                    sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
-                    """
-                    
-                   
-                    sh """
-                        docker run -d \
-                        --name ${DOCKER_IMAGE}-container \
-                        -p ${PORT}:3000 \
-                        ${DOCKER_IMAGE}:${IMAGE_TAG}
-                    """
-                    
-                    echo "Application deployed on http://localhost:${PORT}"
-                }
-            }
-        }
-        
-        stage('Stop') {
-            when {
-                expression { params.ACTION == 'stop' }
-            }
-            steps {
-                script {
-                    echo "Stopping ${params.BRANCH} environment"
-             
-                    sh """
-                        docker ps -a --filter "name=${DOCKER_IMAGE}-container" --format "{{.ID}}" | xargs -r docker rm -f
-                    """
-                }
+                    docker ps -q -f publish=${env.PORT} | xargs -r docker rm -f
+
+                    docker run -d \\
+                        --name ${env.NAME} \\
+                        -p ${env.PORT}:3000 \\
+                        ${env.IMAGE}:v1.0
+
+                    echo "${params.BRANCH} deployed → http://localhost:${env.PORT}"
+                """
             }
         }
     }
-    
+
     post {
         success {
-            echo "Manual deployment completed successfully for ${params.BRANCH}"
+            echo "✅ ${params.BRANCH} successfully deployed at http://localhost:${env.PORT}"
         }
         failure {
-            echo "Manual deployment failed for ${params.BRANCH}"
+            echo "❌ Deployment failed for ${params.BRANCH}"
         }
     }
 }

@@ -52,6 +52,9 @@ pipeline {
                     docker build -t ${env.IMAGE}:v1.0 .
 
                     
+                    docker rm -f ${env.NAME} || true
+
+                    
                     docker ps -q -f publish=${env.PORT} | xargs -r docker rm -f
 
                     docker run -d \\
